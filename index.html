@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <title>Video in 50ms-Frames schneiden & herunterladen</title>
+  <style>
+    body { font-family: sans-serif; padding: 20px; }
+    canvas { display: none; }
+    .frames { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
+    .frame { border: 1px solid #ccc; width: 200px; }
+    button { margin-top: 20px; }
+  </style>
+</head>
+<body>
+  <h1>Video in 50ms-Frames schneiden & herunterladen</h1>
+  <input type="file" accept="video/*" id="videoInput">
+  <br><br>
+  <button id="downloadZip" disabled>📦 Alle Frames als ZIP herunterladen</button>
+  <video id="video" style="display:none;"></video>
+  <canvas id="canvas"></canvas>
+  <div class="frames" id="framesContainer"></div>
+
+  <!-- JSZip von CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const videoInput = document.getElementById('videoInput');
+      const videoElement = document.getElementById('video');
+      const canvas = document.getElementById('canvas');
+      const context = canvas.getContext('2d');
+      const downloadZipButton = document.getElementById('downloadZip');
+      const framesContainer = document.getElementById('framesContainer');
+
+      const frameInterval = 0.05; // 50ms in seconds
+
+      videoInput.addEventListener('change', (event) => {
+        const file = event.target.files[0];
+        if (file) {
+          const videoURL = URL.createObjectURL(file);
+          videoElement.src = videoURL;
+          downloadZipButton.disabled = true;
+          framesContainer.innerHTML = ''; // Clear previous frames
+        }
+      });
+
+      videoElement.addEventListener('loadedmetadata', () => {
+        downloadZipButton.disabled = false;
+        canvas.width = videoElement.videoWidth;
+        canvas.height = videoElement.videoHeight;
+      });
+
+      downloadZipButton.addEventListener('click', async () => {
+        downloadZipButton.disabled = true;
+        downloadZipButton.textContent = 'Verarbeite Frames...';
+        framesContainer.innerHTML = '';
+
+        const zip = new JSZip();
+        let currentFrameTime = 0;
+        const duration = videoElement.duration;
+        let frameCounter = 0;
+        const totalFrames = Math.ceil(duration / frameInterval);
+
+        // Ensure video is paused and at the beginning for consistent seeking
+        videoElement.pause();
+        videoElement.currentTime = 0;
+
+        const extractFrame = () => {
+          return new Promise(resolve => {
+            if (currentFrameTime <= duration) {
+              videoElement.currentTime = currentFrameTime;
+
+              const onSeekedHandler = () => {
+                videoElement.removeEventListener('seeked', onSeekedHandler); // Clean up event listener
+
+                context.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
+                const dataURL = canvas.toDataURL('image/png');
+                const base64Data = dataURL.split(',')[1];
+                const frameName = `frame_${(currentFrameTime * 1000).toFixed(0).padStart(7, '0')}ms.png`;
+                zip.file(frameName, base64Data, { base64: true });
+                
+                frameCounter++;
+                downloadZipButton.textContent = `Verarbeite Frames: ${frameCounter}/${totalFrames} ...`;
+
+                currentFrameTime += frameInterval;
+                resolve();
+              };
+              // Add a temporary event listener for each seek operation
+              videoElement.addEventListener('seeked', onSeekedHandler);
+
+            } else {
+              resolve(); // No more frames to extract
+            }
+          });
+        };
+
+        // Loop through and extract all frames sequentially
+        while (currentFrameTime <= duration) {
+            await extractFrame();
+        }
+
+        downloadZipButton.textContent = 'Erstelle ZIP...';
+        zip.generateAsync({ type: "blob" })
+            .then(function(content) {
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(content);
+                link.download = 'video_frames.zip';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                URL.revokeObjectURL(link.href); // Clean up the URL object
+
+                downloadZipButton.disabled = false;
+                downloadZipButton.textContent = '📦 Alle Frames als ZIP herunterladen';
+                alert('ZIP-Datei erfolgreich erstellt und heruntergeladen!');
+            })
+            .catch(err => {
+                console.error('Fehler beim Erstellen der ZIP-Datei:', err);
+                alert('Es gab einen Fehler beim Erstellen der ZIP-Datei.');
+                downloadZipButton.disabled = false;
+                downloadZipButton.textContent = '📦 Alle Frames als ZIP herunterladen';
+            });
+      });
+    });
+  </script>
+</body>
+</html>
